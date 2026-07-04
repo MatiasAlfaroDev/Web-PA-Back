@@ -1,58 +1,88 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# Courses App — Backend (Laravel API)
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+Backend estilo AdventJS: estudiantes se registran con **CI uruguaya**, verifican su email con un código, leen lecciones, resuelven **code challenges** que se ejecutan en sandbox ([Judge0](https://judge0.com/)) y compiten en un **leaderboard**. Los docentes ven el progreso de cada estudiante y administran cursos/lecciones/challenges.
 
-## About Laravel
+## Stack
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+- Laravel (API REST, sin vistas) + Sanctum (tokens)
+- PostgreSQL 16
+- Judge0 CE (ejecución de código en sandbox, self-hosted en Docker)
+- Mailpit (SMTP de desarrollo con UI web)
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+## Setup
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
-
-## Learning Laravel
-
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
-
-In addition, [Laracasts](https://laracasts.com) contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
-
-You can also watch bite-sized lessons with real-world projects on [Laravel Learn](https://laravel.com/learn), where you will be guided through building a Laravel application from scratch while learning PHP fundamentals.
-
-## Agentic Development
-
-Laravel's predictable structure and conventions make it ideal for AI coding agents like Claude Code, Cursor, and GitHub Copilot. Install [Laravel Boost](https://laravel.com/docs/ai) to supercharge your AI workflow:
+Requisitos: PHP 8.3+, Composer, Docker Desktop.
 
 ```bash
-composer require laravel/boost --dev
+composer install
+cp .env.example .env        # ya viene apuntando a los contenedores locales
+php artisan key:generate
 
-php artisan boost:install
+docker compose up -d        # postgres + mailpit + judge0
+php artisan migrate --seed
+
+php artisan serve           # API en http://localhost:8000
+php artisan queue:work      # worker del judge (segunda terminal)
 ```
 
-Boost provides your agent 15+ tools and skills that help agents build Laravel applications while following best practices.
+- **Mailpit UI:** http://localhost:8025 (acá llegan los códigos de verificación y links de reset)
+- **Judge0:** http://localhost:2358/languages (ids de lenguajes para las submissions)
 
-## Contributing
+### Usuarios seed
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+| Email | Password | Rol |
+|---|---|---|
+| `teacher@courses.test` | `Password1!` | teacher |
+| `ana@courses.test` / `bruno@courses.test` | `Password1!` | student |
 
-## Code of Conduct
+## API
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+Autenticación: `Authorization: Bearer <token>` (el token lo devuelve `/api/login`). Todas las rutas protegidas exigen email verificado.
 
-## Security Vulnerabilities
+### Público
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+| Método | Ruta | Descripción |
+|---|---|---|
+| POST | `/api/register` | `first_name, last_name, ci, email, password` — valida CI uruguaya, envía código por email |
+| POST | `/api/verify-email` | `email, code` (6 dígitos, expira en 15 min) |
+| POST | `/api/resend-code` | `email` |
+| POST | `/api/login` | `email, password` → `{token, user}` |
+| POST | `/api/forgot-password` | `email` — envía link a `FRONTEND_URL/reset-password` |
+| POST | `/api/reset-password` | `token, email, password, password_confirmation` |
 
-## License
+### Estudiante (autenticado + verificado)
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+| Método | Ruta | Descripción |
+|---|---|---|
+| GET/PATCH | `/api/profile` | Ver / editar `first_name, last_name, bio` |
+| GET | `/api/courses`, `/api/courses/{id}` | Cursos, con lecciones y challenges publicados |
+| GET | `/api/lessons/{id}` | Contenido markdown de la lección |
+| GET | `/api/challenges/{id}` | Enunciado + test cases de ejemplo (no ocultos) + mejor puntaje propio |
+| POST | `/api/challenges/{id}/submissions` | `language_id` (id Judge0), `code` → 202, se juzga async |
+| GET | `/api/submissions/{id}` | Estado/resultado de la submission (propia) |
+| GET | `/api/challenges/{id}/submissions` | Historial propio en el challenge |
+| GET | `/api/leaderboard` | Ranking: suma del mejor puntaje por challenge |
+
+### Docente (rol `teacher`)
+
+| Método | Ruta |
+|---|---|
+| POST/PATCH/DELETE | `/api/courses[/{id}]` |
+| POST | `/api/courses/{id}/lessons` · PATCH/DELETE `/api/lessons/{id}` |
+| POST | `/api/courses/{id}/challenges` · PATCH/DELETE `/api/challenges/{id}` |
+| GET | `/api/teacher/challenges/{id}` (incluye test cases ocultos) |
+| POST | `/api/challenges/{id}/test-cases` · PATCH/DELETE `/api/test-cases/{id}` |
+| GET | `/api/teacher/students` — estudiantes con puntaje total y challenges resueltos |
+| GET | `/api/teacher/students/{id}` — progreso por challenge + últimas submissions |
+
+## Puntaje
+
+`score = round(points × tests_pasados / tests_totales)` (parcial por test case). El leaderboard suma el **mejor intento** por challenge. Un challenge cuenta como *resuelto* cuando todos los tests pasan.
+
+## Tests
+
+```bash
+php artisan test
+```
+
+Judge0 se mockea con `Http::fake()`; no se necesita Docker para correr los tests.

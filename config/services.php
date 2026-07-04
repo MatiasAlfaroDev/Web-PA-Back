@@ -35,4 +35,8 @@ return [
         ],
     ],
 
+    'judge0' => [
+        'url' => env('JUDGE0_URL', 'http://localhost:2358'),
+    ],
+
 ];

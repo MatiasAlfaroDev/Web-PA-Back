@@ -24,11 +24,16 @@ class UserFactory extends Factory
      */
     public function definition(): array
     {
+        $ciBody = str_pad((string) fake()->unique()->numberBetween(1000000, 5999999), 7, '0', STR_PAD_LEFT);
+
         return [
-            'name' => fake()->name(),
+            'first_name' => fake()->firstName(),
+            'last_name' => fake()->lastName(),
+            'ci' => $ciBody.\App\Rules\CedulaUruguaya::checkDigit($ciBody),
             'email' => fake()->unique()->safeEmail(),
             'email_verified_at' => now(),
             'password' => static::$password ??= Hash::make('password'),
+            'role' => 'student',
             'remember_token' => Str::random(10),
         ];
     }

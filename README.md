@@ -86,3 +86,20 @@ php artisan test
 ```
 
 Judge0 se mockea con `Http::fake()`; no se necesita Docker para correr los tests.
+
+## Troubleshooting
+
+### Judge0 devuelve "Internal Error" en todos los test cases
+
+En los logs del worker aparece `Failed to create control group /sys/fs/cgroup/memory/box-N/: No such file or directory`.
+
+Causa: el `isolate` de Judge0 1.13.x necesita **cgroup v1**, pero Docker Desktop / WSL2 modernos usan **cgroup v2**. El código de la app es correcto (los tests lo prueban); es un tema del host.
+
+Fix (WSL2): crear/editar `C:\Users\<usuario>\.wslconfig` y forzar cgroup v1:
+
+```ini
+[wsl2]
+kernelCommandLine = systemd.unified_cgroup_hierarchy=0
+```
+
+Luego, en PowerShell: `wsl --shutdown` (cierra Docker Desktop), reiniciar Docker Desktop y `docker compose up -d` de nuevo. Referencia: [docs de instalación de Judge0 — cgroup v2](https://github.com/judge0/judge0/blob/master/CHANGELOG.md).

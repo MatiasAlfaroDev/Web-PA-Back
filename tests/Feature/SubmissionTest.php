@@ -6,7 +6,6 @@ use App\Models\Challenge;
 use App\Models\Course;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
 class SubmissionTest extends TestCase
@@ -40,39 +39,18 @@ class SubmissionTest extends TestCase
         ]);
     }
 
-    private int $judgePassing = 0;
+    private const CORRECT_CODE = "const [a, b] = stdin.split(' ').map(Number); console.log(a + b);";
 
-    /** Fake Judge0 once: first $judgePassing cases accepted, rest wrong answer. */
-    private function fakeJudge0(int $passing, int $total = 4): void
-    {
-        $this->judgePassing = $passing;
-
-        Http::preventStrayRequests();
-        Http::fake(function ($request) use ($total) {
-            if ($request->method() === 'POST') {
-                return Http::response(array_map(fn ($i) => ['token' => "tok-$i"], range(1, $total)));
-            }
-
-            return Http::response(['submissions' => array_map(fn ($i) => [
-                'token' => "tok-$i",
-                'status' => $i <= $this->judgePassing
-                    ? ['id' => 3, 'description' => 'Accepted']
-                    : ['id' => 4, 'description' => 'Wrong Answer'],
-                'time' => '0.01',
-                'memory' => 1024,
-            ], range(1, $total))]);
-        });
-    }
+    // Only correct while the first number is below 3 — passes the first two
+    // (non-hidden) test cases and fails the other two.
+    private const PARTIAL_CODE = "const [a, b] = stdin.split(' ').map(Number); console.log(a < 3 ? a + b : 0);";
 
     public function test_partial_score_and_leaderboard_best_attempt(): void
     {
         // First attempt: 2 of 4 pass → 50 points, partial.
-        $this->fakeJudge0(passing: 2, total: 4);
-
         $id = $this->actingAs($this->student)
             ->postJson("/api/challenges/{$this->challenge->id}/submissions", [
-                'language_id' => 71,
-                'code' => 'print(sum(map(int, input().split())))',
+                'code' => self::PARTIAL_CODE,
             ])->assertStatus(202)->json('id');
 
         $this->actingAs($this->student)->getJson("/api/submissions/$id")
@@ -82,11 +60,9 @@ class SubmissionTest extends TestCase
             ->assertJsonPath('passed_count', 2);
 
         // Second attempt: all pass → 100 points.
-        $this->judgePassing = 4;
         $this->actingAs($this->student)
             ->postJson("/api/challenges/{$this->challenge->id}/submissions", [
-                'language_id' => 71,
-                'code' => 'better code',
+                'code' => self::CORRECT_CODE,
             ])->assertStatus(202);
 
         // Leaderboard shows best attempt only (100, not 150).
@@ -108,11 +84,9 @@ class SubmissionTest extends TestCase
 
     public function test_students_cannot_read_others_submissions(): void
     {
-        $this->fakeJudge0(passing: 4, total: 4);
         $id = $this->actingAs($this->student)
             ->postJson("/api/challenges/{$this->challenge->id}/submissions", [
-                'language_id' => 71,
-                'code' => 'x',
+                'code' => self::CORRECT_CODE,
             ])->json('id');
 
         $other = User::factory()->create();

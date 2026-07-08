@@ -35,8 +35,8 @@ return [
         ],
     ],
 
-    'judge0' => [
-        'url' => env('JUDGE0_URL', 'http://localhost:2358'),
+    'piston' => [
+        'url' => env('PISTON_API_URL', 'http://localhost:2000/api/v2'),
     ],
 
 ];

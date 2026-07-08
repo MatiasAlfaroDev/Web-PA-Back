@@ -1,32 +1,35 @@
 # Courses App — Backend (Laravel API)
 
-Backend estilo AdventJS: estudiantes se registran con **CI uruguaya**, verifican su email con un código, leen lecciones, resuelven **code challenges** que se ejecutan en sandbox ([Judge0](https://judge0.com/)) y compiten en un **leaderboard**. Los docentes ven el progreso de cada estudiante y administran cursos/lecciones/challenges.
+Backend estilo AdventJS: estudiantes se registran con **CI uruguaya**, verifican su email con un código, leen lecciones, resuelven **code challenges** en JavaScript (sandbox: `node:vm`) y compiten en un **leaderboard**. Los docentes ven el progreso de cada estudiante y administran cursos/lecciones/challenges.
 
 ## Stack
 
 - Laravel (API REST, sin vistas) + Sanctum (tokens)
-- PostgreSQL 16
-- Judge0 CE (ejecución de código en sandbox, self-hosted en Docker)
+- PostgreSQL (Supabase)
+- Judge: JavaScript vía proceso Node.js (`judge/run.mjs`, sandbox `node:vm` + timeout); Java vía Piston self-hosted (Docker)
 - Mailpit (SMTP de desarrollo con UI web)
 
 ## Setup
 
-Requisitos: PHP 8.3+, Composer, Docker Desktop.
+Requisitos: PHP 8.3+, Composer, Node.js, Docker (judge de Java), una base Postgres (Supabase).
 
 ```bash
 composer install
-cp .env.example .env        # ya viene apuntando a los contenedores locales
+npm install
+cp .env.example .env
 php artisan key:generate
 
-docker compose up -d        # postgres + mailpit + judge0
+# completar DB_PASSWORD en .env con la contraseña de Supabase
 php artisan migrate --seed
+
+docker compose up -d        # levanta Piston (judge de Java) en localhost:2000
+curl -X POST http://localhost:2000/api/v2/packages \
+  -H "Content-Type: application/json" \
+  -d '{"language":"java","version":"15.0.2"}'   # sólo la primera vez
 
 php artisan serve           # API en http://localhost:8000
 php artisan queue:work      # worker del judge (segunda terminal)
 ```
-
-- **Mailpit UI:** http://localhost:8025 (acá llegan los códigos de verificación y links de reset)
-- **Judge0:** http://localhost:2358/languages (ids de lenguajes para las submissions)
 
 ### Usuarios seed
 
@@ -57,8 +60,8 @@ Autenticación: `Authorization: Bearer <token>` (el token lo devuelve `/api/logi
 | GET/PATCH | `/api/profile` | Ver / editar `first_name, last_name, bio` |
 | GET | `/api/courses`, `/api/courses/{id}` | Cursos, con lecciones y challenges publicados |
 | GET | `/api/lessons/{id}` | Contenido markdown de la lección |
-| GET | `/api/challenges/{id}` | Enunciado + test cases de ejemplo (no ocultos) + mejor puntaje propio |
-| POST | `/api/challenges/{id}/submissions` | `language_id` (id Judge0), `code` → 202, se juzga async |
+| GET | `/api/challenges/{id}` | Enunciado + starter code + test cases de ejemplo (no ocultos) + mejor puntaje propio |
+| POST | `/api/challenges/{id}/submissions` | `code` (JS) → 202, se juzga async |
 | GET | `/api/submissions/{id}` | Estado/resultado de la submission (propia) |
 | GET | `/api/challenges/{id}/submissions` | Historial propio en el challenge |
 | GET | `/api/leaderboard` | Ranking: suma del mejor puntaje por challenge |
@@ -75,6 +78,13 @@ Autenticación: `Authorization: Bearer <token>` (el token lo devuelve `/api/logi
 | GET | `/api/teacher/students` — estudiantes con puntaje total y challenges resueltos |
 | GET | `/api/teacher/students/{id}` — progreso por challenge + últimas submissions |
 
+## Judge
+
+Cada submission se corre contra los `test_cases` del challenge, comparando stdout contra `expected_output`. `Challenge.language` decide el runner:
+
+- **`javascript`** (default): el código recibe el `stdin` de cada caso en la variable global `stdin` e imprime con `console.log`. `JudgeSubmission` invoca `node judge/run.mjs`, que corre el código en un `node:vm` context con timeout — aísla globals (sin `require`/`process`/`fs`) pero no es un sandbox de seguridad fuerte tipo `isolated-vm` (ese paquete requiere un toolchain C++20, no disponible en todos los hosts). Suficiente para un curso; revisar si alguna vez hay que endurecerlo contra código adversarial.
+- **`java`**: el código debe ser una clase `public class Main` con `main(String[] args)` que lee de `System.in` (típicamente con `Scanner`) e imprime con `System.out.println`. `JudgeSubmission` llama a **Piston** ([engineer-man/piston](https://github.com/engineer-man/piston)) self-hosted vía Docker (`docker-compose.yml`, puerto 2000) — un POST a `/api/v2/execute` por test case, que compila y ejecuta en un contenedor aislado. La API pública de Piston (emkc.org) pasó a ser whitelist-only en 2026; por eso se self-hostea. Piston usa `nsjail`, no `isolate`, así que no sufre el problema de cgroup v1/v2 que tuvo Judge0. Mismo nivel de confianza "aula" que el sandbox de JS: no es defensa contra código adversarial (el contenedor corre `--privileged`).
+
 ## Puntaje
 
 `score = round(points × tests_pasados / tests_totales)` (parcial por test case). El leaderboard suma el **mejor intento** por challenge. Un challenge cuenta como *resuelto* cuando todos los tests pasan.
@@ -85,21 +95,4 @@ Autenticación: `Authorization: Bearer <token>` (el token lo devuelve `/api/logi
 php artisan test
 ```
 
-Judge0 se mockea con `Http::fake()`; no se necesita Docker para correr los tests.
-
-## Troubleshooting
-
-### Judge0 devuelve "Internal Error" en todos los test cases
-
-En los logs del worker aparece `Failed to create control group /sys/fs/cgroup/memory/box-N/: No such file or directory`.
-
-Causa: el `isolate` de Judge0 1.13.x necesita **cgroup v1**, pero Docker Desktop / WSL2 modernos usan **cgroup v2**. El código de la app es correcto (los tests lo prueban); es un tema del host.
-
-Fix (WSL2): crear/editar `C:\Users\<usuario>\.wslconfig` y forzar cgroup v1:
-
-```ini
-[wsl2]
-kernelCommandLine = systemd.unified_cgroup_hierarchy=0
-```
-
-Luego, en PowerShell: `wsl --shutdown` (cierra Docker Desktop), reiniciar Docker Desktop y `docker compose up -d` de nuevo. Referencia: [docs de instalación de Judge0 — cgroup v2](https://github.com/judge0/judge0/blob/master/CHANGELOG.md).
+Las submissions de test corren el judge real (Node) contra código JS embebido en los tests; no hace falta mockear nada.

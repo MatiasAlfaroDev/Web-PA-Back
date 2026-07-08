@@ -41,14 +41,15 @@ class DatabaseSeeder extends Seeder
 
         $lesson = $course->lessons()->create([
             'title' => 'Entrada y salida estándar',
-            'content' => "# Entrada y salida\n\nTus soluciones leen de **stdin** y escriben a **stdout**.\n\nEjemplo en Python:\n```python\na, b = map(int, input().split())\nprint(a + b)\n```",
+            'content' => "# Entrada y salida\n\nTus soluciones leen de **stdin** y escriben a **stdout** con `console.log`.\n\nEjemplo:\n```js\nconst [a, b] = stdin.split(' ').map(Number);\nconsole.log(a + b);\n```",
             'position' => 1,
         ]);
 
         $suma = $course->challenges()->create([
             'lesson_id' => $lesson->id,
             'title' => 'Suma dos números',
-            'statement' => "Leé dos enteros separados por espacio desde stdin e imprimí su suma.\n\n**Entrada:** `2 3`\n**Salida:** `5`",
+            'statement' => "Leé dos enteros separados por espacio desde `stdin` e imprimí su suma con `console.log`.\n\n**Entrada:** `2 3`\n**Salida:** `5`",
+            'starter_code' => "const [a, b] = stdin.split(' ').map(Number);\nconsole.log(a + b);\n",
             'points' => 100,
             'difficulty' => 'easy',
             'position' => 1,
@@ -65,7 +66,8 @@ class DatabaseSeeder extends Seeder
         $reverso = $course->challenges()->create([
             'lesson_id' => $lesson->id,
             'title' => 'Texto al revés',
-            'statement' => "Leé una línea desde stdin e imprimila invertida.\n\n**Entrada:** `hola`\n**Salida:** `aloh`",
+            'statement' => "Leé una línea desde `stdin` e imprimila invertida.\n\n**Entrada:** `hola`\n**Salida:** `aloh`",
+            'starter_code' => "console.log(stdin.split('').reverse().join(''));\n",
             'points' => 150,
             'difficulty' => 'medium',
             'position' => 2,
@@ -76,5 +78,7 @@ class DatabaseSeeder extends Seeder
             ['stdin' => 'hola', 'expected_output' => 'aloh', 'is_hidden' => false],
             ['stdin' => 'AdventJS', 'expected_output' => 'SJtnevdA', 'is_hidden' => true],
         ]);
+
+        $this->call(JavaOopCoursesSeeder::class);
     }
 }

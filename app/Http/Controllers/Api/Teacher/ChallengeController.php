@@ -44,10 +44,12 @@ class ChallengeController extends Controller
         return $request->validate([
             'title' => ['sometimes', 'required', 'string', 'max:255'],
             'statement' => ['sometimes', 'required', 'string'],
+            'starter_code' => ['sometimes', 'nullable', 'string'],
             'points' => ['sometimes', 'integer', 'min:1'],
             'difficulty' => ['sometimes', Rule::in(['easy', 'medium', 'hard'])],
             'position' => ['sometimes', 'integer', 'min:0'],
             'published' => ['sometimes', 'boolean'],
+            'language' => ['sometimes', Rule::in(['javascript', 'java'])],
             'lesson_id' => ['sometimes', 'nullable', Rule::exists('lessons', 'id')->where('course_id', $course->id)],
         ]);
     }

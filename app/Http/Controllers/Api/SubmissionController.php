@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Jobs\JudgeSubmission;
 use App\Models\Challenge;
 use App\Models\Submission;
+use App\Support\Progress;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -14,15 +15,14 @@ class SubmissionController extends Controller
     public function store(Request $request, Challenge $challenge): JsonResponse
     {
         abort_unless($challenge->published, 404);
+        abort_unless(Progress::unlocked($request->user(), $challenge), 403, 'Este challenge todavía no está desbloqueado.');
 
         $data = $request->validate([
-            'language_id' => ['required', 'integer', 'min:1'],
             'code' => ['required', 'string', 'max:65535'],
         ]);
 
         $submission = $challenge->submissions()->create([
             'user_id' => $request->user()->id,
-            'language_id' => $data['language_id'],
             'code' => $data['code'],
         ]);
 

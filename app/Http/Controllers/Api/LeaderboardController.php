@@ -3,7 +3,9 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Support\Progress;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
 class LeaderboardController extends Controller
@@ -29,8 +31,20 @@ class LeaderboardController extends Controller
             ->orderBy('users.id')
             ->get();
 
+        // Solve dates for all students in one query → streak per user.
+        $datesByUser = DB::table('submissions')
+            ->where('status', 'passed')
+            ->selectRaw('user_id, created_at')
+            ->get()
+            ->groupBy('user_id')
+            ->map(fn ($group) => $group
+                ->map(fn ($r) => Carbon::parse($r->created_at)->setTimezone(Progress::TZ)->toDateString())
+                ->all());
+
         return response()->json(
-            $rows->values()->map(fn ($row, $i) => ['rank' => $i + 1] + (array) $row)
+            $rows->values()->map(fn ($row, $i) => ['rank' => $i + 1] + (array) $row + [
+                'streak' => Progress::streakFromDates($datesByUser[$row->id] ?? []),
+            ])
         );
     }
 }

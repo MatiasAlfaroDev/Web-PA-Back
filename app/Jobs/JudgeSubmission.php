@@ -3,19 +3,21 @@
 namespace App\Jobs;
 
 use App\Models\Submission;
-use App\Services\Judge0Client;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Process;
 
 class JudgeSubmission implements ShouldQueue
 {
     use Queueable;
 
-    public int $timeout = 120;
+    public int $timeout = 90;
 
     public function __construct(public Submission $submission) {}
 
-    public function handle(Judge0Client $judge0): void
+    public function handle(): void
     {
         $submission = $this->submission;
         $testCases = $submission->challenge->testCases;
@@ -28,58 +30,109 @@ class JudgeSubmission implements ShouldQueue
 
         $submission->update(['status' => 'judging', 'total_count' => $testCases->count()]);
 
-        try {
-            $tokens = $judge0->submitBatch($testCases->map(fn ($tc) => [
-                'source_code' => $submission->code,
-                'language_id' => $submission->language_id,
-                'stdin' => $tc->stdin,
-                'expected_output' => $tc->expected_output,
-            ])->all());
+        if ($submission->challenge->language === 'java') {
+            $this->handleJava($submission, $testCases);
 
-            // ponytail: simple 1s poll loop, move to Judge0 callbacks if volume grows
-            $deadline = now()->addSeconds(90);
-            do {
-                sleep(1);
-                $results = $judge0->getBatch($tokens);
-                $pending = collect($results)->contains(fn ($r) => ($r['status']['id'] ?? 1) < 3);
-            } while ($pending && now()->lessThan($deadline));
+            return;
+        }
 
-            if ($pending) {
-                $submission->update(['status' => 'error', 'judge_output' => ['message' => 'Timeout esperando resultados del judge.']]);
+        $this->handleJavascript($submission, $testCases);
+    }
 
-                return;
+    private function handleJavascript(Submission $submission, $testCases): void
+    {
+        $payload = json_encode([
+            'code' => $submission->code,
+            'tests' => $testCases->map(fn ($tc) => ['stdin' => $tc->stdin])->all(),
+            'timeoutMs' => 3000,
+        ]);
+
+        $result = Process::path(base_path())
+            ->input($payload)
+            ->timeout(30)
+            ->run(['node', 'judge/run.mjs']);
+
+        if (! $result->successful()) {
+            $submission->update(['status' => 'error', 'judge_output' => ['message' => $result->errorOutput() ?: 'El judge falló al ejecutar el código.']]);
+
+            return;
+        }
+
+        $results = json_decode($result->output(), true);
+
+        if (! is_array($results)) {
+            $submission->update(['status' => 'error', 'judge_output' => ['message' => 'Respuesta inválida del judge.']]);
+
+            return;
+        }
+
+        $this->grade($submission, $testCases, $results);
+    }
+
+    // ponytail: sin JDK local ni Docker — cada test case se compila y corre en
+    // la API pública de Piston (emkc.org), un POST por test. Sin rate-limit
+    // garantizado; si el aula lo satura, self-host Piston (docker run
+    // engineer-man/piston) es el upgrade path, mismo contrato HTTP.
+    private function handleJava(Submission $submission, $testCases): void
+    {
+        $version = $this->pistonJavaVersion();
+        $url = rtrim(config('services.piston.url'), '/').'/execute';
+
+        $results = $testCases->map(function ($tc) use ($submission, $url, $version) {
+            try {
+                $response = Http::timeout(20)->post($url, [
+                    'language' => 'java',
+                    'version' => $version,
+                    'files' => [['name' => 'Main.java', 'content' => $submission->code]],
+                    'stdin' => $tc->stdin ?? '',
+                ])->throw()->json();
+            } catch (\Throwable $e) {
+                return ['stdout' => '', 'error' => 'Error al contactar el judge de Java: '.$e->getMessage()];
             }
 
-            $this->grade($submission, $testCases, $results);
-        } catch (\Throwable $e) {
-            $submission->update(['status' => 'error', 'judge_output' => ['message' => $e->getMessage()]]);
+            if (isset($response['compile']) && ($response['compile']['code'] ?? 0) !== 0) {
+                return ['stdout' => '', 'error' => trim($response['compile']['stderr'] ?? '') ?: 'Error de compilación.'];
+            }
 
-            throw $e;
-        }
+            $run = $response['run'] ?? [];
+
+            return [
+                'stdout' => $run['stdout'] ?? '',
+                'error' => ($run['code'] ?? 0) !== 0 ? (trim($run['stderr'] ?? '') ?: 'Error en ejecución.') : null,
+            ];
+        })->all();
+
+        $this->grade($submission, $testCases, $results);
+    }
+
+    private function pistonJavaVersion(): string
+    {
+        return Cache::remember('piston_java_version', now()->addDay(), function () {
+            $runtimes = Http::timeout(10)->get(rtrim(config('services.piston.url'), '/').'/runtimes')->json();
+
+            return collect($runtimes)->firstWhere('language', 'java')['version'] ?? '15.0.2';
+        });
     }
 
     private function grade(Submission $submission, $testCases, array $results): void
     {
         $cases = collect($results)->values()->map(function (array $r, int $i) use ($testCases) {
+            $passed = $r['error'] === null && trim($r['stdout'] ?? '') === trim($testCases[$i]->expected_output);
+
             return [
                 'test_case_id' => $testCases[$i]->id,
                 'hidden' => $testCases[$i]->is_hidden,
-                'status' => $r['status']['description'] ?? 'Unknown',
-                'passed' => ($r['status']['id'] ?? 0) === 3,
-                'time' => $r['time'] ?? null,
-                'memory' => $r['memory'] ?? null,
-                'stderr' => isset($r['stderr']) && $r['stderr'] ? base64_decode($r['stderr']) : null,
-                'compile_output' => isset($r['compile_output']) && $r['compile_output'] ? base64_decode($r['compile_output']) : null,
+                'passed' => $passed,
+                'stdout' => $r['stdout'] ?? '',
+                'error' => $r['error'],
             ];
         });
 
         $passed = $cases->where('passed', true)->count();
         $total = $cases->count();
-        $compileError = $cases->every(fn ($c) => $c['status'] === 'Compilation Error');
 
         $submission->update([
             'status' => match (true) {
-                $compileError => 'error',
                 $passed === $total => 'passed',
                 $passed > 0 => 'partial',
                 default => 'failed',

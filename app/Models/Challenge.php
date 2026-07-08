@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-#[Fillable(['course_id', 'lesson_id', 'title', 'statement', 'points', 'difficulty', 'position', 'published'])]
+#[Fillable(['course_id', 'lesson_id', 'title', 'statement', 'starter_code', 'points', 'difficulty', 'position', 'published', 'language'])]
 class Challenge extends Model
 {
     protected function casts(): array

@@ -31,6 +31,7 @@ return new class extends Migration
             $table->foreignId('lesson_id')->nullable()->constrained()->nullOnDelete();
             $table->string('title');
             $table->text('statement'); // markdown
+            $table->text('starter_code')->nullable();
             $table->unsignedInteger('points')->default(100);
             $table->string('difficulty')->default('easy'); // easy | medium | hard
             $table->unsignedInteger('position')->default(0);
@@ -51,7 +52,6 @@ return new class extends Migration
             $table->id();
             $table->foreignId('user_id')->constrained()->cascadeOnDelete();
             $table->foreignId('challenge_id')->constrained()->cascadeOnDelete();
-            $table->unsignedInteger('language_id'); // Judge0 language id
             $table->text('code');
             $table->string('status')->default('pending'); // pending|judging|passed|partial|failed|error
             $table->unsignedInteger('passed_count')->default(0);

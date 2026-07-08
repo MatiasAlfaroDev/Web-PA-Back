@@ -5,9 +5,9 @@ namespace App\Jobs;
 use App\Models\Submission;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
-use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Process;
+use Illuminate\Support\Str;
 
 class JudgeSubmission implements ShouldQueue
 {
@@ -69,49 +69,40 @@ class JudgeSubmission implements ShouldQueue
         $this->grade($submission, $testCases, $results);
     }
 
-    // ponytail: sin JDK local ni Docker — cada test case se compila y corre en
-    // la API pública de Piston (emkc.org), un POST por test. Sin rate-limit
-    // garantizado; si el aula lo satura, self-host Piston (docker run
-    // engineer-man/piston) es el upgrade path, mismo contrato HTTP.
+    // ponytail: sin sandbox de contenedor — javac/java corren directo en el worker
+    // (mismo nivel de confianza "aula" que el judge de JS, ver README). Piston
+    // self-hosted requeriría delegación de cgroup v2 que Railway no otorga a
+    // ningún contenedor; si algún día hay que aislar más fuerte, ese es el upgrade path.
     private function handleJava(Submission $submission, $testCases): void
     {
-        $version = $this->pistonJavaVersion();
-        $url = rtrim(config('services.piston.url'), '/').'/execute';
+        $dir = storage_path('app/judge-java/'.Str::uuid());
+        File::ensureDirectoryExists($dir);
 
-        $results = $testCases->map(function ($tc) use ($submission, $url, $version) {
-            try {
-                $response = Http::timeout(20)->post($url, [
-                    'language' => 'java',
-                    'version' => $version,
-                    'files' => [['name' => 'Main.java', 'content' => $submission->code]],
-                    'stdin' => $tc->stdin ?? '',
-                ])->throw()->json();
-            } catch (\Throwable $e) {
-                return ['stdout' => '', 'error' => 'Error al contactar el judge de Java: '.$e->getMessage()];
+        try {
+            File::put($dir.'/Main.java', $submission->code);
+
+            $compile = Process::path($dir)->timeout(15)->run(['javac', 'Main.java']);
+
+            if (! $compile->successful()) {
+                $error = trim($compile->errorOutput()) ?: 'Error de compilación.';
+                $this->grade($submission, $testCases, $testCases->map(fn () => ['stdout' => '', 'error' => $error])->all());
+
+                return;
             }
 
-            if (isset($response['compile']) && ($response['compile']['code'] ?? 0) !== 0) {
-                return ['stdout' => '', 'error' => trim($response['compile']['stderr'] ?? '') ?: 'Error de compilación.'];
-            }
+            $results = $testCases->map(function ($tc) use ($dir) {
+                $run = Process::path($dir)->input($tc->stdin ?? '')->timeout(10)->run(['java', 'Main']);
 
-            $run = $response['run'] ?? [];
+                return [
+                    'stdout' => $run->output(),
+                    'error' => $run->successful() ? null : (trim($run->errorOutput()) ?: 'Error en ejecución.'),
+                ];
+            })->all();
 
-            return [
-                'stdout' => $run['stdout'] ?? '',
-                'error' => ($run['code'] ?? 0) !== 0 ? (trim($run['stderr'] ?? '') ?: 'Error en ejecución.') : null,
-            ];
-        })->all();
-
-        $this->grade($submission, $testCases, $results);
-    }
-
-    private function pistonJavaVersion(): string
-    {
-        return Cache::remember('piston_java_version', now()->addDay(), function () {
-            $runtimes = Http::timeout(10)->get(rtrim(config('services.piston.url'), '/').'/runtimes')->json();
-
-            return collect($runtimes)->firstWhere('language', 'java')['version'] ?? '15.0.2';
-        });
+            $this->grade($submission, $testCases, $results);
+        } finally {
+            File::deleteDirectory($dir);
+        }
     }
 
     private function grade(Submission $submission, $testCases, array $results): void

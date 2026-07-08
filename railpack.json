@@ -1,0 +1,6 @@
+{
+  "provider": "php",
+  "deploy": {
+    "aptPackages": ["default-jdk-headless"]
+  }
+}

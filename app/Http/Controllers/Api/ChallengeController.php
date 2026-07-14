@@ -12,7 +12,8 @@ class ChallengeController extends Controller
 {
     public function show(Request $request, Challenge $challenge): JsonResponse
     {
-        abort_unless($challenge->published || $request->user()->isTeacher(), 404);
+        $isTeacher = $request->user()->isTeacher();
+        abort_unless($isTeacher || ($challenge->published && $challenge->course->isAvailableNow()), 404);
 
         $challenge->load([
             'testCases' => fn ($q) => $q->where('is_hidden', false)

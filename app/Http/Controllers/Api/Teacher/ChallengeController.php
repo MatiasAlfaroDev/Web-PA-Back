@@ -46,6 +46,7 @@ class ChallengeController extends Controller
             'statement' => ['sometimes', 'required', 'string'],
             'starter_code' => ['sometimes', 'nullable', 'string'],
             'points' => ['sometimes', 'integer', 'min:1'],
+            'min_points' => ['sometimes', 'nullable', 'integer', 'min:0'],
             'difficulty' => ['sometimes', Rule::in(['easy', 'medium', 'hard'])],
             'position' => ['sometimes', 'integer', 'min:0'],
             'published' => ['sometimes', 'boolean'],

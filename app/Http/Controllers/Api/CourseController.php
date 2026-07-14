@@ -13,6 +13,8 @@ class CourseController extends Controller
 {
     public function index(Request $request): JsonResponse
     {
+        // Locked courses are listed too (as locked, with a countdown) rather than
+        // hidden — students see what's coming next. show() still gates entry.
         $courses = Course::with('teacher:id,first_name,last_name')
             ->withCount('lessons')
             ->withCount(['challenges' => fn ($q) => $q->where('published', true)])
@@ -39,10 +41,16 @@ class CourseController extends Controller
     {
         $isTeacher = $request->user()->isTeacher();
 
+        abort_unless($isTeacher || $course->isAvailableNow(), 404);
+
         $course->load([
             'teacher:id,first_name,last_name',
-            'lessons:id,course_id,title,position',
-            // Teachers editing a course see drafts too; students only published.
+            // Teachers editing a course see drafts/scheduled lessons too; students only available ones.
+            'lessons' => fn ($q) => $q
+                ->when(! $isTeacher, fn ($qq) => $qq->where('published', true)
+                    ->where(fn ($w) => $w->whereNull('available_from')->orWhere('available_from', '<=', now()))
+                    ->where(fn ($w) => $w->whereNull('available_until')->orWhere('available_until', '>=', now())))
+                ->select('id', 'course_id', 'title', 'position', 'published', 'available_from', 'available_until'),
             'challenges' => fn ($q) => $q
                 ->when(! $isTeacher, fn ($qq) => $qq->where('published', true))
                 ->select('id', 'course_id', 'lesson_id', 'title', 'points', 'difficulty', 'position', 'published'),

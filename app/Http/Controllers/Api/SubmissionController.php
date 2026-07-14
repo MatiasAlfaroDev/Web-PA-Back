@@ -14,7 +14,7 @@ class SubmissionController extends Controller
 {
     public function store(Request $request, Challenge $challenge): JsonResponse
     {
-        abort_unless($challenge->published, 404);
+        abort_unless($challenge->published && $challenge->course->isAvailableNow(), 404);
         abort_unless(Progress::unlocked($request->user(), $challenge), 403, 'Este challenge todavía no está desbloqueado.');
 
         $data = $request->validate([

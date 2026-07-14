@@ -16,6 +16,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'verified.api' => \App\Http\Middleware\EnsureEmailVerified::class,
             'teacher' => \App\Http\Middleware\EnsureTeacher::class,
+            'site.unlocked' => \App\Http\Middleware\EnsureSiteUnlocked::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

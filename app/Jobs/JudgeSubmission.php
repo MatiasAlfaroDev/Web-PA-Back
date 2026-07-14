@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Models\Challenge;
 use App\Models\Submission;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -130,8 +131,30 @@ class JudgeSubmission implements ShouldQueue
             },
             'passed_count' => $passed,
             'total_count' => $total,
-            'score' => (int) round($submission->challenge->points * $passed / $total),
+            'score' => $this->score($submission->challenge, $passed, $total),
             'judge_output' => ['cases' => $cases->all()],
         ]);
+    }
+
+    // Points dropped per solver who got there first, e.g. 100 → 95 → 90 → ...
+    private const DECAY_STEP = 5;
+
+    // Partial credit is proportional to the base points. A full solve instead
+    // decays DECAY_STEP points per student who already solved it first
+    // (rewarding speed), floored at min_points (null = no decay, always full points).
+    private function score(Challenge $challenge, int $passed, int $total): int
+    {
+        if ($passed < $total) {
+            return (int) round($challenge->points * $passed / $total);
+        }
+
+        $priorSolvers = Submission::where('challenge_id', $challenge->id)
+            ->where('status', 'passed')
+            ->distinct('user_id')
+            ->count('user_id');
+
+        $floor = min($challenge->min_points ?? $challenge->points, $challenge->points);
+
+        return max($floor, $challenge->points - $priorSolvers * self::DECAY_STEP);
     }
 }

@@ -16,21 +16,31 @@ Route::middleware(['auth:sanctum', 'verified.api'])->group(function () {
     Route::post('/logout', [Api\AuthController::class, 'logout']);
     Route::get('/profile', [Api\ProfileController::class, 'show']);
     Route::patch('/profile', [Api\ProfileController::class, 'update']);
+    Route::post('/profile/avatar', [Api\ProfileController::class, 'updateAvatar']);
 
-    Route::get('/courses', [Api\CourseController::class, 'index']);
-    Route::get('/courses/{course}', [Api\CourseController::class, 'show']);
-    Route::get('/lessons/{lesson}', [Api\LessonController::class, 'show']);
-    Route::get('/challenges/{challenge}', [Api\ChallengeController::class, 'show']);
+    // Readable even while the site is locked, so the frontend can show why.
+    Route::get('/site-lock', [Api\SiteLockController::class, 'show']);
 
-    Route::post('/challenges/{challenge}/submissions', [Api\SubmissionController::class, 'store'])
-        ->middleware('throttle:20,1');
-    Route::get('/challenges/{challenge}/submissions', [Api\SubmissionController::class, 'indexForChallenge']);
-    Route::get('/submissions/{submission}', [Api\SubmissionController::class, 'show']);
+    // --- Student-facing: blocked while the site is locked (teachers bypass) ---
+    Route::middleware('site.unlocked')->group(function () {
+        Route::get('/courses', [Api\CourseController::class, 'index']);
+        Route::get('/courses/{course}', [Api\CourseController::class, 'show']);
+        Route::get('/lessons/{lesson}', [Api\LessonController::class, 'show']);
+        Route::get('/challenges/{challenge}', [Api\ChallengeController::class, 'show']);
 
-    Route::get('/leaderboard', [Api\LeaderboardController::class, 'index']);
+        Route::post('/challenges/{challenge}/submissions', [Api\SubmissionController::class, 'store'])
+            ->middleware('throttle:20,1');
+        Route::get('/challenges/{challenge}/submissions', [Api\SubmissionController::class, 'indexForChallenge']);
+        Route::get('/submissions/{submission}', [Api\SubmissionController::class, 'show']);
+
+        Route::get('/leaderboard', [Api\LeaderboardController::class, 'index']);
+    });
 
     // --- Teacher only ---
     Route::middleware('teacher')->group(function () {
+        Route::put('/site-lock', [Api\SiteLockController::class, 'update']);
+        Route::delete('/site-lock', [Api\SiteLockController::class, 'destroy']);
+
         Route::post('/courses', [Api\Teacher\CourseController::class, 'store']);
         Route::patch('/courses/{course}', [Api\Teacher\CourseController::class, 'update']);
         Route::delete('/courses/{course}', [Api\Teacher\CourseController::class, 'destroy']);

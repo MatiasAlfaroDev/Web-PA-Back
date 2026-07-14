@@ -17,6 +17,9 @@ class LessonController extends Controller
             'title' => ['required', 'string', 'max:255'],
             'content' => ['required', 'string'],
             'position' => ['sometimes', 'integer', 'min:0'],
+            'published' => ['sometimes', 'boolean'],
+            'available_from' => ['sometimes', 'nullable', 'date'],
+            'available_until' => ['sometimes', 'nullable', 'date'],
         ]);
 
         return response()->json($course->lessons()->create($data), 201);
@@ -28,6 +31,9 @@ class LessonController extends Controller
             'title' => ['sometimes', 'string', 'max:255'],
             'content' => ['sometimes', 'string'],
             'position' => ['sometimes', 'integer', 'min:0'],
+            'published' => ['sometimes', 'boolean'],
+            'available_from' => ['sometimes', 'nullable', 'date'],
+            'available_until' => ['sometimes', 'nullable', 'date'],
         ]);
 
         $lesson->update($data);

@@ -15,13 +15,21 @@ class ChallengeController extends Controller
     public function store(Request $request, Course $course): JsonResponse
     {
         $data = $this->validated($request, $course);
+        if ($data['published'] ?? false) {
+            $data['published_at'] = now();
+        }
 
         return response()->json($course->challenges()->create($data), 201);
     }
 
     public function update(Request $request, Challenge $challenge): JsonResponse
     {
-        $challenge->update($this->validated($request, $challenge->course));
+        $data = $this->validated($request, $challenge->course);
+        // Restart the decay clock only on draft -> published transitions.
+        if (($data['published'] ?? false) && ! $challenge->published) {
+            $data['published_at'] = now();
+        }
+        $challenge->update($data);
 
         return response()->json($challenge);
     }

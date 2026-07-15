@@ -136,25 +136,23 @@ class JudgeSubmission implements ShouldQueue
         ]);
     }
 
-    // Points dropped per solver who got there first, e.g. 100 → 95 → 90 → ...
-    private const DECAY_STEP = 5;
+    // Points dropped per full calendar day the challenge sits unsolved since
+    // it was published, e.g. 100 → 90 → 80 → ...
+    private const DECAY_PER_DAY = 10;
 
-    // Partial credit is proportional to the base points. A full solve instead
-    // decays DECAY_STEP points per student who already solved it first
-    // (rewarding speed), floored at min_points (null = no decay, always full points).
+    // The ceiling decays daily from published_at (null = never published, no
+    // decay), floored at min_points (null = no floor, always full points).
+    // Partial credit is proportional to that decayed ceiling, not the raw points.
     private function score(Challenge $challenge, int $passed, int $total): int
     {
+        $floor = min($challenge->min_points ?? $challenge->points, $challenge->points);
+        $daysSincePublished = $challenge->published_at ? (int) now()->diffInDays($challenge->published_at, absolute: true) : 0;
+        $ceiling = max($floor, $challenge->points - $daysSincePublished * self::DECAY_PER_DAY);
+
         if ($passed < $total) {
-            return (int) round($challenge->points * $passed / $total);
+            return (int) round($ceiling * $passed / $total);
         }
 
-        $priorSolvers = Submission::where('challenge_id', $challenge->id)
-            ->where('status', 'passed')
-            ->distinct('user_id')
-            ->count('user_id');
-
-        $floor = min($challenge->min_points ?? $challenge->points, $challenge->points);
-
-        return max($floor, $challenge->points - $priorSolvers * self::DECAY_STEP);
+        return $ceiling;
     }
 }

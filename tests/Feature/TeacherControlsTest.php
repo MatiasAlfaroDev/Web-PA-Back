@@ -75,22 +75,25 @@ class TeacherControlsTest extends TestCase
         $this->actingAs($this->student)->putJson('/api/site-lock', ['duration_minutes' => 5])->assertForbidden();
     }
 
-    public function test_score_decays_per_solver_and_floors_at_min_points(): void
+    public function test_score_decays_per_day_since_published_and_floors_at_min_points(): void
     {
-        $challenge = $this->course->challenges()->create([
-            'title' => 'Reto', 'statement' => 'x', 'points' => 100, 'min_points' => 85, 'published' => true,
-        ]);
-        $challenge->testCases()->create(['stdin' => '', 'expected_output' => 'ok', 'is_hidden' => false]);
+        // daysAgo => expected score (100 - daysAgo*10, floored at 85).
+        $cases = [0 => 100, 1 => 90, 2 => 85, 10 => 85];
 
-        $solvers = User::factory()->count(5)->create();
+        foreach ($cases as $daysAgo => $expected) {
+            // Its own course so each challenge is first-in-sequence (trivially unlocked).
+            $course = Course::create(['title' => "Curso $daysAgo", 'teacher_id' => $this->teacher->id]);
+            $challenge = $course->challenges()->create([
+                'title' => "Reto $daysAgo", 'statement' => 'x', 'points' => 100, 'min_points' => 85,
+                'published' => true, 'published_at' => now()->subDays($daysAgo),
+            ]);
+            $challenge->testCases()->create(['stdin' => '', 'expected_output' => 'ok', 'is_hidden' => false]);
 
-        foreach ($solvers as $i => $solver) {
+            $solver = User::factory()->create();
             $id = $this->actingAs($solver)
                 ->postJson("/api/challenges/{$challenge->id}/submissions", ['code' => "console.log('ok')"])
                 ->assertStatus(202)->json('id');
 
-            // 100, 95, 90, 85, 85 (floored) for solvers 0..4.
-            $expected = max(85, 100 - $i * 5);
             $this->actingAs($solver)->getJson("/api/submissions/$id")->assertJsonPath('score', $expected);
         }
     }

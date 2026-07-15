@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Carbon;
 
 /** Singleton row (id = 1). No row / null / past locked_until = unlocked. */
-#[Fillable(['locked_until'])]
+#[Fillable(['id', 'locked_until'])]
 class SiteLock extends Model
 {
     protected function casts(): array
@@ -18,9 +18,9 @@ class SiteLock extends Model
     /** Current lock expiry if still in the future, else null. */
     public static function activeUntil(): ?Carbon
     {
-        $until = static::query()->value('locked_until');
+        $until = static::find(1)?->locked_until;
 
-        return $until && Carbon::parse($until)->isFuture() ? Carbon::parse($until) : null;
+        return $until && $until->isFuture() ? $until : null;
     }
 
     public static function set(Carbon $until): self
@@ -30,6 +30,6 @@ class SiteLock extends Model
 
     public static function clear(): void
     {
-        static::query()->delete();
+        static::whereKey(1)->delete();
     }
 }
